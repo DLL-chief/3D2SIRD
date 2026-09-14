@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>3D2SIRD — стенд генератора</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: system-ui, sans-serif;
+        background: #fff;
+        color: #222;
+      }
+      canvas {
+        display: block;
+        margin-top: 12px;
+        max-width: 100%;
+        image-rendering: pixelated;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Временный стенд: стереограмма синтетической полусферы для проверки
+         глазами. Настоящий UI появится в src/ui/ (STATUS.md, беклог). -->
+    <h1>Стенд: стереограмма полусферы</h1>
+    <p id="status">Генерация…</p>
+    <canvas id="output"></canvas>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
