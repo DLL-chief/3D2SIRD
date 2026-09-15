@@ -26,7 +26,12 @@ const linearDepthMaterial = new THREE.ShaderMaterial({
   `,
 });
 
-export function renderDepth(renderer, scene, camera, { width, height, blur = 0 }) {
+export function renderDepth(
+  renderer,
+  scene,
+  camera,
+  { width, height, blur = 0, floor = 0 },
+) {
   const target = new THREE.WebGLRenderTarget(width, height, {
     type: THREE.FloatType,
     format: THREE.RGBAFormat,
@@ -80,6 +85,6 @@ export function renderDepth(renderer, scene, camera, { width, height, blur = 0 }
     }
   }
 
-  const data = normalizeDepth(viewZ);
+  const data = normalizeDepth(viewZ, floor);
   return { width, height, data: blur > 0 ? blurDepth(data, width, height, blur) : data };
 }
