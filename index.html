@@ -13,6 +13,10 @@
         background: #fff;
         color: #222;
       }
+      body.dragover {
+        outline: 3px dashed #4a90d9;
+        outline-offset: -8px;
+      }
       main {
         max-width: 1200px;
       }
@@ -39,6 +43,21 @@
         font-variant-numeric: tabular-nums;
         font-weight: 600;
       }
+      .views {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: flex-start;
+        margin-bottom: 12px;
+      }
+      .views figure {
+        margin: 0;
+      }
+      .views figcaption {
+        font-size: 0.8rem;
+        color: #666;
+        margin-top: 4px;
+      }
       #status {
         font-variant-numeric: tabular-nums;
       }
@@ -46,10 +65,16 @@
         display: block;
         image-rendering: pixelated;
       }
-      #depth-preview {
-        width: 200px;
+      #scene-view {
+        width: 320px;
+        height: 240px;
         border: 1px solid #ccc;
-        margin-bottom: 12px;
+        cursor: grab;
+        image-rendering: auto;
+      }
+      #depth-preview {
+        width: 240px;
+        border: 1px solid #ccc;
       }
     </style>
   </head>
@@ -59,22 +84,25 @@
     <main>
       <h1>Стенд: стереограмма</h1>
       <p>
-        Смотреть «сквозь» экран — параллельный взгляд, как на Magic Eye. Если
-        рельеф выходит ступеньками, поднимайте <b>E</b>: сепарация округляется
-        до целых пикселей, и число ступеней рельефа зависит от него напрямую
-        (показано ниже). Если объём кажется преувеличенным или сцена «рвётся» —
-        убавляйте <b>μ</b>.
+        Смотреть «сквозь» экран — параллельный взгляд, как на Magic Eye. Модель
+        слева можно крутить мышью, стереограмма пересчитается под новый угол.
+        Свою модель — перетащите файл <code>.glb</code> на страницу.
       </p>
 
       <div class="controls">
         <label>
-          Объект
+          Модель
           <select id="object">
             <option value="sphere">Сфера</option>
             <option value="torus">Тор</option>
             <option value="knot">Тор-узел</option>
-            <option value="hemisphere">Полусфера (синтетика, без depth/)</option>
+            <option value="hemisphere">Полусфера (синтетика, без scene/depth)</option>
+            <option value="loaded" hidden>Загруженная модель</option>
           </select>
+        </label>
+        <label>
+          Свой файл .glb
+          <input id="file" type="file" accept=".glb,.gltf,model/gltf-binary" />
         </label>
         <label>
           E — межзрачковое расстояние, px: <output id="eye-out"></output>
@@ -100,7 +128,17 @@
 
       <p id="status">Генерация…</p>
 
-      <canvas id="depth-preview"></canvas>
+      <div class="views">
+        <figure>
+          <canvas id="scene-view"></canvas>
+          <figcaption>Сцена — крутите мышью</figcaption>
+        </figure>
+        <figure>
+          <canvas id="depth-preview"></canvas>
+          <figcaption>Карта глубины: белое ближе, чёрное — фон</figcaption>
+        </figure>
+      </div>
+
       <canvas id="output"></canvas>
     </main>
 
