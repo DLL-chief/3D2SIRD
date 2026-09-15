@@ -13,45 +13,96 @@
         background: #fff;
         color: #222;
       }
-      h2 {
-        margin-top: 32px;
-        font-size: 1.1rem;
+      main {
+        max-width: 1200px;
       }
       p {
-        max-width: 60ch;
+        max-width: 70ch;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 12px 20px;
+        margin: 16px 0;
+        padding: 12px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+      }
+      .controls label {
+        display: block;
+        font-size: 0.85rem;
+      }
+      .controls input[type='range'] {
+        width: 100%;
+      }
+      .controls output {
+        font-variant-numeric: tabular-nums;
+        font-weight: 600;
+      }
+      #status {
+        font-variant-numeric: tabular-nums;
       }
       canvas {
         display: block;
-        margin-top: 12px;
-        max-width: 100%;
         image-rendering: pixelated;
       }
-      .preview {
-        max-width: 240px;
+      #depth-preview {
+        width: 200px;
         border: 1px solid #ccc;
+        margin-bottom: 12px;
       }
     </style>
   </head>
   <body>
-    <!-- Временный стенд для проверки глазами. Настоящий UI появится в
-         src/ui/ (STATUS.md, беклог). -->
-    <h1>Стенд: стереограммы</h1>
-    <p id="status">Генерация…</p>
+    <!-- Временный стенд для подбора параметров глазами. Настоящий UI
+         появится в src/ui/ (STATUS.md, беклог). -->
+    <main>
+      <h1>Стенд: стереограмма</h1>
+      <p>
+        Смотреть «сквозь» экран — параллельный взгляд, как на Magic Eye. Если
+        рельеф выходит ступеньками, поднимайте <b>E</b>: сепарация округляется
+        до целых пикселей, и число ступеней рельефа зависит от него напрямую
+        (показано ниже). Если объём кажется преувеличенным или сцена «рвётся» —
+        убавляйте <b>μ</b>.
+      </p>
 
-    <h2>1. Синтетическая полусфера — эталон <code>sird/</code></h2>
-    <p>
-      Карта глубины считается формулой, без Three.js. Если полусфера читается,
-      а тор-узел ниже — нет, проблема в <code>depth/</code>, а не в генераторе.
-    </p>
-    <canvas id="hemisphere-output"></canvas>
+      <div class="controls">
+        <label>
+          Объект
+          <select id="object">
+            <option value="sphere">Сфера</option>
+            <option value="torus">Тор</option>
+            <option value="knot">Тор-узел</option>
+            <option value="hemisphere">Полусфера (синтетика, без depth/)</option>
+          </select>
+        </label>
+        <label>
+          E — межзрачковое расстояние, px: <output id="eye-out"></output>
+          <input id="eye" type="range" min="60" max="300" step="10" value="160" />
+        </label>
+        <label>
+          μ — сила рельефа: <output id="mu-out"></output>
+          <input id="mu" type="range" min="0.1" max="0.9" step="0.05" value="0.4" />
+        </label>
+        <label>
+          Размытие карты глубины, px: <output id="blur-out"></output>
+          <input id="blur" type="range" min="0" max="6" step="1" value="2" />
+        </label>
+        <label>
+          Подъём модели над фоном: <output id="floor-out"></output>
+          <input id="floor" type="range" min="0" max="0.6" step="0.05" value="0.35" />
+        </label>
+        <label>
+          <input id="cross-eyed" type="checkbox" />
+          Перекрёстный взгляд
+        </label>
+      </div>
 
-    <h2>2. Тор-узел — полный путь <code>depth/</code> → <code>sird/</code></h2>
-    <p>
-      Сцена Three.js рендерится в карту глубины, она уходит в генератор.
-      Слева — превью карты глубины (белое ближе к зрителю, чёрное — фон).
-    </p>
-    <canvas id="knot-depth" class="preview"></canvas>
-    <canvas id="knot-output"></canvas>
+      <p id="status">Генерация…</p>
+
+      <canvas id="depth-preview"></canvas>
+      <canvas id="output"></canvas>
+    </main>
 
     <script type="module" src="/src/main.js"></script>
   </body>
