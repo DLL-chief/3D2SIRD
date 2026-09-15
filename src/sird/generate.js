@@ -11,8 +11,8 @@
 import { createPatternSource } from './pattern.js';
 
 const DEFAULT_PARAMS = {
-  eyeSeparation: 90,
-  depthStrength: 1 / 3,
+  eyeSeparation: 180,
+  depthStrength: 0.45,
   crossEyed: false,
   pattern: { type: 'noise', color: false },
 };
