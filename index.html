@@ -13,20 +13,46 @@
         background: #fff;
         color: #222;
       }
+      h2 {
+        margin-top: 32px;
+        font-size: 1.1rem;
+      }
+      p {
+        max-width: 60ch;
+      }
       canvas {
         display: block;
         margin-top: 12px;
         max-width: 100%;
         image-rendering: pixelated;
       }
+      .preview {
+        max-width: 240px;
+        border: 1px solid #ccc;
+      }
     </style>
   </head>
   <body>
-    <!-- Временный стенд: стереограмма синтетической полусферы для проверки
-         глазами. Настоящий UI появится в src/ui/ (STATUS.md, беклог). -->
-    <h1>Стенд: стереограмма полусферы</h1>
+    <!-- Временный стенд для проверки глазами. Настоящий UI появится в
+         src/ui/ (STATUS.md, беклог). -->
+    <h1>Стенд: стереограммы</h1>
     <p id="status">Генерация…</p>
-    <canvas id="output"></canvas>
+
+    <h2>1. Синтетическая полусфера — эталон <code>sird/</code></h2>
+    <p>
+      Карта глубины считается формулой, без Three.js. Если полусфера читается,
+      а тор-узел ниже — нет, проблема в <code>depth/</code>, а не в генераторе.
+    </p>
+    <canvas id="hemisphere-output"></canvas>
+
+    <h2>2. Тор-узел — полный путь <code>depth/</code> → <code>sird/</code></h2>
+    <p>
+      Сцена Three.js рендерится в карту глубины, она уходит в генератор.
+      Слева — превью карты глубины (белое ближе к зрителю, чёрное — фон).
+    </p>
+    <canvas id="knot-depth" class="preview"></canvas>
+    <canvas id="knot-output"></canvas>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
