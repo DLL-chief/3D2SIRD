@@ -22,10 +22,35 @@ export function drawDepthMap(canvas, depthMap) {
   canvas.getContext('2d').putImageData(image, 0, 0);
 }
 
-export function drawStereogram(canvas, image) {
-  canvas.width = image.width;
-  canvas.height = image.height;
-  canvas.getContext('2d').putImageData(image, 0, 0);
+// Буфер для растягивания черновика: заводится один раз и по требованию,
+// чтобы модуль можно было импортировать в Node (тесты берут отсюда чистые
+// функции, а DOM там нет).
+let scratchCanvas = null;
+
+export function drawStereogram(canvas, image, displaySize) {
+  const width = displaySize?.width ?? image.width;
+  const height = displaySize?.height ?? image.height;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+
+  const context = canvas.getContext('2d');
+  if (width === image.width && height === image.height) {
+    context.putImageData(image, 0, 0);
+    return;
+  }
+
+  // Черновик при вращении считается в меньшем разрешении и растягивается:
+  // точки становятся крупнее, зато кадр успевает за мышью. Сглаживание
+  // выключено — размытые точки не сводятся глазами вообще, а крупные
+  // хотя бы читаются. Итоговый кадр после остановки рисуется 1:1.
+  if (!scratchCanvas) scratchCanvas = document.createElement('canvas');
+  scratchCanvas.width = image.width;
+  scratchCanvas.height = image.height;
+  scratchCanvas.getContext('2d').putImageData(image, 0, 0);
+  context.imageSmoothingEnabled = false;
+  context.drawImage(scratchCanvas, 0, 0, width, height);
 }
 
 // Размеры выхода. Стереограмма сводится глазами только при показе пиксель

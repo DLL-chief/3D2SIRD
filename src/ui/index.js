@@ -7,10 +7,12 @@ import { renderDepth } from '../depth/index.js';
 import { blurDepth } from '../depth/blur.js';
 import { makeHemisphereDepthMap } from '../sird/synthetic.js';
 import { separationRange } from '../sird/separation.js';
+import { createGeneratorPool } from '../sird/pool.js';
 import { createControls } from './controls.js';
 import { drawDepthMap, drawStereogram, outputSize } from './render.js';
 import { downloadCanvasPng, pngFilename } from './export.js';
 import { decodeImageFile, textureToImageData } from './texture.js';
+import { nextDraftScale } from './draft-scale.js';
 
 const SCENE_VIEW_WIDTH = 320;
 const SCENE_VIEW_HEIGHT = 240;
@@ -65,24 +67,12 @@ export function mountUi(root) {
     requestAnimationFrame(animate);
   }
 
-  const worker = new Worker(new URL('../sird/worker.js', import.meta.url), {
-    type: 'module',
-  });
-  const pendingReplies = [];
-  worker.onmessage = (event) => pendingReplies.shift()(event.data);
-
-  function generateStereogram(depthMap, params) {
-    return new Promise((resolve, reject) => {
-      pendingReplies.push((message) =>
-        message.type === 'error'
-          ? reject(new Error(message.message))
-          : resolve(message),
-      );
-      // Буфер уходит в Worker через transfer и здесь становится пустым
-      // (docs/api_contracts.md, п.1) — превью надо рисовать до этого вызова.
-      worker.postMessage({ depthMap, params }, [depthMap.data.buffer]);
-    });
-  }
+  // Кадр считается полосами в нескольких воркерах — иначе вращение в
+  // реальном времени не укладывается в кадр (docs/adr/004). Воркеров по
+  // числу ядер: работа по строкам однородна, дробить мельче незачем.
+  const pool = createGeneratorPool(
+    Math.max(1, Math.min(navigator.hardwareConcurrency ?? 4, 8)),
+  );
 
   function buildDepthMap(values, width, height) {
     const { blur, floor } = values;
@@ -117,18 +107,22 @@ export function mountUi(root) {
     return { type: 'noise', color: values.pattern === 'noise-color', seed: 42 };
   }
 
-  // Каждый запуск получает номер: результат устаревшего запроса
-  // выбрасывается, иначе на экран успевает попасть картинка от предыдущего
-  // положения ползунка (README модуля, инварианты).
-  let currentRun = 0;
+  // Во время вращения кадр считается в уменьшенном масштабе и растягивается
+  // на полотно: так вся цепочка depth → sird укладывается в кадр. После
+  // остановки идёт итоговый расчёт пиксель в пиксель (docs/adr/004).
+  // Масштаб подстраивается по факту — см. draft-scale.js.
+  let draftScale = 0.6;
 
-  async function refresh() {
-    const run = ++currentRun;
+  async function render(mode) {
     const values = controls.read();
     controls.showValues(values);
-    controls.setBusy(true);
 
-    const { width, height } = outputSize(values.resolution, root.clientWidth);
+    const display = outputSize(values.resolution, root.clientWidth);
+    const scale = mode === 'draft' ? draftScale : 1;
+    const width = Math.round(display.width * scale);
+    const height = Math.round(display.height * scale);
+    const frameStarted = performance.now();
+
     const depthMap = buildDepthMap(values, width, height);
     drawDepthMap(depthCanvas, depthMap);
 
@@ -137,22 +131,29 @@ export function mountUi(root) {
       values.depthStrength,
     );
 
-    const result = await generateStereogram(depthMap, {
+    const result = await pool.generate(depthMap, {
       eyeSeparation: values.eyeSeparation,
       depthStrength: values.depthStrength,
       crossEyed: values.crossEyed,
       pattern: patternFor(values, far),
     });
-    if (run !== currentRun) return;
 
-    drawStereogram(outputCanvas, result.image);
-    controls.setBusy(false);
+    drawStereogram(outputCanvas, result.image, display);
 
-    const scaled = width > root.clientWidth;
+    // Масштаб черновика меряется по всей цепочке, а не по одному
+    // генератору: карта глубины считается в том же кадре.
+    if (mode === 'draft') {
+      draftScale = nextDraftScale(draftScale, performance.now() - frameStarted);
+    }
+
+    const scaled = display.width > root.clientWidth;
     status.textContent =
-      `${width}×${height}, ${result.ms.toFixed(0)} мс. ` +
+      (mode === 'draft'
+        ? `Черновик ${width}×${height} (вращение), `
+        : `${display.width}×${display.height}, `) +
+      `${result.ms.toFixed(0)} мс в ${result.bands} потоках. ` +
       `Ступеней рельефа: ${levels} (сепарация ${near}..${far} px, ` +
-      `повторов узора по ширине: ${(width / far).toFixed(1)}).` +
+      `повторов узора по ширине: ${(display.width / far).toFixed(1)}).` +
       (values.model === 'hemisphere'
         ? ' Карта считается формулой, сцена не используется.'
         : '') +
@@ -166,16 +167,39 @@ export function mountUi(root) {
         : '');
   }
 
+  // Расчёты идут строго по одному, а лишние запросы схлопываются в один
+  // отложенный: при вращении события сыплются чаще, чем считается кадр, и
+  // очередь иначе растёт без предела. Итоговый кадр в очереди черновик не
+  // вытесняет (README модуля, инварианты).
+  let running = false;
+  let queued = null;
+
+  function requestFrame(mode) {
+    if (running) {
+      queued = queued === 'final' ? 'final' : mode;
+      return;
+    }
+    running = true;
+    controls.setBusy(true);
+    render(mode)
+      .catch((error) => {
+        status.textContent = `Ошибка: ${error.message}`;
+      })
+      .finally(() => {
+        running = false;
+        controls.setBusy(false);
+        if (queued) {
+          const next = queued;
+          queued = null;
+          requestFrame(next);
+        }
+      });
+  }
+
   let timer;
   function scheduleRefresh() {
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      refresh().catch((error) => {
-        status.textContent = `Ошибка: ${error.message}`;
-        controls.setBusy(false);
-        throw error;
-      });
-    }, 150);
+    timer = setTimeout(() => requestFrame('final'), 150);
   }
 
   controls.onModelChange((kind) => {
@@ -203,10 +227,12 @@ export function mountUi(root) {
     status.textContent = `${status.textContent} PNG сохранён, ${Math.round(size / 1024)} КБ.`;
   });
 
-  // Вращение и зум меняют кадр, значит и карту глубины. Пересчёт по `end`
-  // (отпустили кнопку, довернули колесом), а не по `change`: последний
-  // сыплется на каждое движение мыши, и генератор не успевал бы за жестом.
-  orbit.addEventListener('end', scheduleRefresh);
+  // Вращение и зум меняют кадр, значит и карту глубины. Пока мышь ведёт
+  // модель (`change`), считаются черновики — стереограмма живёт вместе с
+  // вращением; по завершении жеста (`end`) идёт итоговый кадр в полном
+  // разрешении. Без дебаунса: лишние запросы схлопывает requestFrame.
+  orbit.addEventListener('change', () => requestFrame('draft'));
+  orbit.addEventListener('end', () => requestFrame('final'));
   // При изменении ширины окна стереограмму надо пересчитать, а не
   // растягивать готовую — растянутая не сводится.
   window.addEventListener('resize', scheduleRefresh);
