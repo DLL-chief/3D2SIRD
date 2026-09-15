@@ -18,7 +18,11 @@ const DEFAULT_PARAMS = {
   pattern: { type: 'noise', color: false },
 };
 
-export function generate(depthMap, params = {}) {
+// rowOffset сдвигает координату узора по вертикали: строки обрабатываются
+// независимо друг от друга, поэтому кадр можно считать полосами в
+// нескольких воркерах, а смещение оставляет результат ровно таким же, как
+// при расчёте целиком (см. src/sird/pool.js).
+export function generate(depthMap, params = {}, rowOffset = 0) {
   const { width, height, data: depth } = depthMap;
   if (depth.length !== width * height) {
     throw new Error(
@@ -89,7 +93,7 @@ export function generate(depthMap, params = {}) {
     for (let x = width - 1; x >= 0; x--) {
       const i = (row + x) * 4;
       if (same[x] === x) {
-        const [r, g, b] = colorAt(x, y);
+        const [r, g, b] = colorAt(x, y + rowOffset);
         out[i] = r;
         out[i + 1] = g;
         out[i + 2] = b;
