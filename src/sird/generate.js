@@ -9,6 +9,7 @@
 // Контракты входа/выхода — docs/api_contracts.md.
 
 import { createPatternSource } from './pattern.js';
+import { separation } from './separation.js';
 
 const DEFAULT_PARAMS = {
   eyeSeparation: 180,
@@ -42,7 +43,7 @@ export function generate(depthMap, params = {}) {
 
     for (let x = 0; x < width; x++) {
       const z = crossEyed ? 1 - depth[row + x] : depth[row + x];
-      const sep = Math.round((E * (1 - mu * z)) / (2 - mu * z));
+      const sep = separation(z, E, mu);
       let left = x - (sep >> 1);
       let right = left + sep;
       if (left < 0 || right >= width) continue;
