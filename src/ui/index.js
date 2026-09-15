@@ -105,16 +105,46 @@ export function mountUi(root) {
     return renderDepth(renderer, scene, camera, { width, height, blur, floor });
   }
 
-  // Картинка для узора хранится как ImageBitmap: масштаб зависит от E,
-  // поэтому под каждый пересчёт она уменьшается заново.
+  // Картинка для узора хранится как ImageBitmap: масштаб зависит от E и от
+  // режима, поэтому под каждый пересчёт она уменьшается заново. Результат
+  // кэшируется — при вращении E и режим не меняются, а getImageData на
+  // каждый кадр стоит миллисекунды.
   let texture = null;
+  let scaledTexture = null;
+
+  // Во сколько периодов шириной уменьшается картинка для режимов, которые
+  // берут из неё полосу. Ровно в период уменьшать нельзя: полоса тогда и
+  // есть вся картинка, и «сдвиг по строкам» ничего не открывает; сильно
+  // шире — полоса становится случайным вертикальным срезом без узнаваемого
+  // содержимого, да и копий ImageData в воркеры уходит больше.
+  const STRIP_TEXTURE_PERIODS = 4;
+
+  function textureWidthFor(mode, period) {
+    // 'squeeze' сжимает картинку сам, выборкой ближайшего соседа. Чтобы
+    // она не рассыпалась в алиасинг, уменьшение до ширины полосы делает
+    // canvas (он усредняет пиксели), а генератор потом берёт столбцы
+    // один к одному.
+    return mode === 'squeeze' ? period : period * STRIP_TEXTURE_PERIODS;
+  }
+
+  function textureData(width) {
+    if (scaledTexture?.bitmap !== texture || scaledTexture.width !== width) {
+      scaledTexture = { bitmap: texture, width, data: textureToImageData(texture, width) };
+    }
+    return scaledTexture.data;
+  }
 
   function patternFor(values, backgroundSeparation) {
     if (values.pattern === 'image' && texture) {
-      // Ширина берётся по сепарации фона, а не по E: именно с таким
-      // периодом повторяется узор, и при ширине E половина картинки в
-      // кадр не попадает вовсе (docs/api_contracts.md, п.3).
-      return { type: 'image', data: textureToImageData(texture, backgroundSeparation) };
+      // Период узора — сепарация фона round(E/2), а не E: именно с таким
+      // шагом повторяется полоса (docs/api_contracts.md, п.3).
+      return {
+        type: 'image',
+        data: textureData(textureWidthFor(values.patternMode, backgroundSeparation)),
+        mode: values.patternMode,
+        mirror: values.mirror,
+        driftPerRow: values.driftPerRow,
+      };
     }
     return { type: 'noise', color: values.pattern === 'noise-color', seed: 42 };
   }
