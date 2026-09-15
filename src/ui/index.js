@@ -10,6 +10,7 @@ import { separationRange } from '../sird/separation.js';
 import { createControls } from './controls.js';
 import { drawDepthMap, drawStereogram, outputSize } from './render.js';
 import { downloadCanvasPng, pngFilename } from './export.js';
+import { decodeImageFile, textureToImageData } from './texture.js';
 
 const SCENE_VIEW_WIDTH = 320;
 const SCENE_VIEW_HEIGHT = 240;
@@ -102,6 +103,20 @@ export function mountUi(root) {
     return renderDepth(renderer, scene, camera, { width, height, blur, floor });
   }
 
+  // Картинка для узора хранится как ImageBitmap: масштаб зависит от E,
+  // поэтому под каждый пересчёт она уменьшается заново.
+  let texture = null;
+
+  function patternFor(values, backgroundSeparation) {
+    if (values.pattern === 'image' && texture) {
+      // Ширина берётся по сепарации фона, а не по E: именно с таким
+      // периодом повторяется узор, и при ширине E половина картинки в
+      // кадр не попадает вовсе (docs/api_contracts.md, п.3).
+      return { type: 'image', data: textureToImageData(texture, backgroundSeparation) };
+    }
+    return { type: 'noise', color: values.pattern === 'noise-color', seed: 42 };
+  }
+
   // Каждый запуск получает номер: результат устаревшего запроса
   // выбрасывается, иначе на экран успевает попасть картинка от предыдущего
   // положения ползунка (README модуля, инварианты).
@@ -117,21 +132,22 @@ export function mountUi(root) {
     const depthMap = buildDepthMap(values, width, height);
     drawDepthMap(depthCanvas, depthMap);
 
+    const { near, far, levels } = separationRange(
+      values.eyeSeparation,
+      values.depthStrength,
+    );
+
     const result = await generateStereogram(depthMap, {
       eyeSeparation: values.eyeSeparation,
       depthStrength: values.depthStrength,
       crossEyed: values.crossEyed,
-      pattern: { type: 'noise', color: false, seed: 42 },
+      pattern: patternFor(values, far),
     });
     if (run !== currentRun) return;
 
     drawStereogram(outputCanvas, result.image);
     controls.setBusy(false);
 
-    const { near, far, levels } = separationRange(
-      values.eyeSeparation,
-      values.depthStrength,
-    );
     const scaled = width > root.clientWidth;
     status.textContent =
       `${width}×${height}, ${result.ms.toFixed(0)} мс. ` +
@@ -139,6 +155,9 @@ export function mountUi(root) {
       `повторов узора по ширине: ${(width / far).toFixed(1)}).` +
       (values.model === 'hemisphere'
         ? ' Карта считается формулой, сцена не используется.'
+        : '') +
+      (values.pattern === 'image' && !texture
+        ? ' Картинка для узора не выбрана — рисую случайными точками.'
         : '') +
       (scaled
         ? ' Картинка шире страницы: в PNG она годится, а на экране сводится' +
@@ -169,6 +188,16 @@ export function mountUi(root) {
   });
   controls.onInput(scheduleRefresh);
   controls.onFile(useFile);
+  controls.onTexture(async (file) => {
+    status.textContent = `Загружаю ${file.name}…`;
+    try {
+      texture = await decodeImageFile(file);
+      controls.setPattern('image');
+      scheduleRefresh();
+    } catch (error) {
+      status.textContent = `Не удалось открыть ${file.name}: ${error.message}`;
+    }
+  });
   controls.onExport(async () => {
     const size = await downloadCanvasPng(outputCanvas, pngFilename(new Date()));
     status.textContent = `${status.textContent} PNG сохранён, ${Math.round(size / 1024)} КБ.`;

@@ -17,6 +17,12 @@ const RESOLUTIONS = [
   { value: '2560', label: '2560 × 1792' },
 ];
 
+const PATTERNS = [
+  { value: 'noise-bw', label: 'Случайные точки, ч/б' },
+  { value: 'noise-color', label: 'Случайные точки, цветные' },
+  { value: 'image', label: 'Своя картинка' },
+];
+
 const SLIDERS = [
   {
     name: 'eyeSeparation',
@@ -91,6 +97,15 @@ export function createControls() {
     resolution.add(new Option(label, value));
   }
 
+  const pattern = document.createElement('select');
+  for (const { value, label } of PATTERNS) {
+    pattern.add(new Option(label, value));
+  }
+
+  const texture = document.createElement('input');
+  texture.type = 'file';
+  texture.accept = 'image/*';
+
   const crossEyed = document.createElement('input');
   crossEyed.type = 'checkbox';
 
@@ -105,6 +120,8 @@ export function createControls() {
     labelled('Модель', model),
     labelled('Свой файл .glb', file),
     labelled('Разрешение выхода', resolution),
+    labelled('Узор', pattern),
+    labelled('Картинка для узора', texture),
   );
 
   for (const slider of SLIDERS) {
@@ -130,6 +147,7 @@ export function createControls() {
     const values = {
       model: model.value,
       resolution: resolution.value,
+      pattern: pattern.value,
       crossEyed: crossEyed.checked,
     };
     for (const [name, input] of sliders) {
@@ -160,8 +178,17 @@ export function createControls() {
         if (chosen) handler(chosen);
       });
     },
+    onTexture(handler) {
+      texture.addEventListener('change', () => {
+        const [chosen] = texture.files;
+        if (chosen) handler(chosen);
+      });
+    },
+    setPattern(value) {
+      pattern.value = value;
+    },
     onInput(handler) {
-      for (const input of [...sliders.values(), resolution, crossEyed]) {
+      for (const input of [...sliders.values(), resolution, pattern, crossEyed]) {
         input.addEventListener('input', handler);
       }
     },
