@@ -1,21 +1,20 @@
-// Временный стенд: подбор параметров стереограммы глазами. Собирает сцену
-// Three.js, гоняет её через depth/ → sird/ и перерисовывает на каждое
-// движение ползунка. Будет заменён на настоящий UI (src/ui/).
+// Временный стенд: крутим модель мышью, гоняем сцену через depth/ → sird/
+// и подбираем параметры ползунками. Будет заменён на настоящий UI
+// (src/ui/) по мере выполнения беклога.
 
 import * as THREE from 'three';
+import { createScene, createDemoModel, loadModel, showModel } from './scene/index.js';
 import { renderDepth } from './depth/index.js';
 import { blurDepth } from './depth/blur.js';
 import { makeHemisphereDepthMap } from './sird/synthetic.js';
 
-const GEOMETRIES = {
-  sphere: () => new THREE.SphereGeometry(0.4, 64, 48),
-  torus: () => new THREE.TorusGeometry(0.28, 0.14, 96, 48),
-  knot: () => new THREE.TorusKnotGeometry(0.3, 0.1, 160, 32),
-};
+const SCENE_VIEW_WIDTH = 320;
+const SCENE_VIEW_HEIGHT = 240;
 
 const statusEl = document.getElementById('status');
 const outputCanvas = document.getElementById('output');
 const previewCanvas = document.getElementById('depth-preview');
+const sceneCanvas = document.getElementById('scene-view');
 
 const inputs = {
   object: document.getElementById('object'),
@@ -25,6 +24,22 @@ const inputs = {
   floor: document.getElementById('floor'),
   crossEyed: document.getElementById('cross-eyed'),
 };
+
+const renderer = new THREE.WebGLRenderer({ canvas: sceneCanvas, antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(SCENE_VIEW_WIDTH, SCENE_VIEW_HEIGHT, false);
+
+const { scene, camera, controls } = createScene(sceneCanvas);
+camera.aspect = SCENE_VIEW_WIDTH / SCENE_VIEW_HEIGHT;
+camera.updateProjectionMatrix();
+showModel(scene, createDemoModel('sphere'));
+
+// OrbitControls зовёт свой update() из обработчиков сам (затухание
+// выключено), поэтому здесь остаётся только рисовать предпросмотр.
+function animate() {
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
 
 const worker = new Worker(new URL('./sird/worker.js', import.meta.url), {
   type: 'module',
@@ -45,10 +60,6 @@ function generateStereogram(depthMap, params) {
   });
 }
 
-// Рендерер создаётся один раз: браузер держит около 16 WebGL-контекстов, и
-// новый рендерер на каждое движение ползунка быстро упёрся бы в лимит.
-let renderer;
-
 function buildDepthMap({ object, width, height, blur, floor }) {
   if (object === 'hemisphere') {
     const source = makeHemisphereDepthMap(width, height).data;
@@ -61,26 +72,10 @@ function buildDepthMap({ object, width, height, blur, floor }) {
       data: blur > 0 ? blurDepth(data, width, height, blur) : data,
     };
   }
-
-  const scene = new THREE.Scene();
-  const mesh = new THREE.Mesh(GEOMETRIES[object](), new THREE.MeshBasicMaterial());
-  scene.add(mesh);
-
-  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10);
-  camera.position.set(0, 0, 1.6);
-  camera.lookAt(0, 0, 0);
-
-  if (!renderer) renderer = new THREE.WebGLRenderer();
-  const depthMap = renderDepth(renderer, scene, camera, {
-    width,
-    height,
-    blur,
-    floor,
-  });
-
-  mesh.geometry.dispose();
-  mesh.material.dispose();
-  return depthMap;
+  // Сцена и камера уходят в depth/ как есть: он подменяет материал и
+  // аспект камеры на время рендера и возвращает всё обратно, поэтому
+  // предпросмотр от этого не ломается.
+  return renderDepth(renderer, scene, camera, { width, height, blur, floor });
 }
 
 function drawDepthPreview(depthMap) {
@@ -131,7 +126,6 @@ async function refresh() {
 
   const { eyeSeparation: E, depthStrength: mu } = settings;
   const sep = (z) => Math.round((E * (1 - mu * z)) / (2 - mu * z));
-  const levels = sep(0) - sep(1) + 1;
 
   const result = await generateStereogram(depthMap, {
     eyeSeparation: E,
@@ -146,8 +140,9 @@ async function refresh() {
 
   statusEl.textContent =
     `${width}×${height}, ${result.ms.toFixed(0)} мс. ` +
-    `Ступеней рельефа: ${levels} (сепарация ${sep(1)}..${sep(0)} px, ` +
-    `повторов узора по ширине: ${(width / sep(0)).toFixed(1)}).`;
+    `Ступеней рельефа: ${sep(0) - sep(1) + 1} (сепарация ${sep(1)}..${sep(0)} px, ` +
+    `повторов узора по ширине: ${(width / sep(0)).toFixed(1)}).` +
+    (settings.object === 'hemisphere' ? ' Карта считается формулой, сцена не используется.' : '');
 }
 
 let timer;
@@ -161,11 +156,54 @@ function scheduleRefresh() {
   }, 150);
 }
 
+inputs.object.addEventListener('change', () => {
+  const kind = inputs.object.value;
+  // hemisphere считается формулой, loaded уже в сцене — демо-геометрия
+  // собирается только для встроенных моделей.
+  if (kind !== 'hemisphere' && kind !== 'loaded') {
+    showModel(scene, createDemoModel(kind));
+  }
+  scheduleRefresh();
+});
+
 for (const input of Object.values(inputs)) {
   input.addEventListener('input', scheduleRefresh);
 }
+// Вращение и зум меняют кадр, значит и карту глубины. Пересчёт по `end`
+// (отпустили кнопку, довернули колесом), а не по `change`: последний
+// сыплется на каждое движение мыши, и генератор не успевал бы за жестом.
+controls.addEventListener('end', scheduleRefresh);
 // При изменении ширины окна стереограмму надо пересчитать, а не растягивать
 // готовую — растянутая не сводится.
 window.addEventListener('resize', scheduleRefresh);
 
+async function useFile(file) {
+  statusEl.textContent = `Загружаю ${file.name}…`;
+  try {
+    showModel(scene, await loadModel(file));
+    inputs.object.value = 'loaded';
+    scheduleRefresh();
+  } catch (error) {
+    statusEl.textContent = `Не удалось открыть ${file.name}: ${error.message}`;
+  }
+}
+
+document.getElementById('file').addEventListener('change', (event) => {
+  const [file] = event.target.files;
+  if (file) useFile(file);
+});
+
+document.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  document.body.classList.add('dragover');
+});
+document.addEventListener('dragleave', () => document.body.classList.remove('dragover'));
+document.addEventListener('drop', (event) => {
+  event.preventDefault();
+  document.body.classList.remove('dragover');
+  const [file] = event.dataTransfer.files;
+  if (file) useFile(file);
+});
+
+animate();
 scheduleRefresh();
