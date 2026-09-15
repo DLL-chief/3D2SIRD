@@ -2,7 +2,13 @@
 // Точка входа модуля, `src/main.js` только зовёт mountUi().
 
 import * as THREE from 'three';
-import { createScene, createDemoModel, loadModel, showModel } from '../scene/index.js';
+import {
+  createScene,
+  attachControls,
+  createDemoModel,
+  loadModel,
+  showModel,
+} from '../scene/index.js';
 import { renderDepth } from '../depth/index.js';
 import { blurDepth } from '../depth/blur.js';
 import { makeHemisphereDepthMap } from '../sird/synthetic.js';
@@ -12,7 +18,7 @@ import { createControls } from './controls.js';
 import { drawDepthMap, drawStereogram, outputSize } from './render.js';
 import { downloadCanvasPng, pngFilename } from './export.js';
 import { decodeImageFile, textureToImageData } from './texture.js';
-import { nextDraftScale } from './draft-scale.js';
+import { nextDraftScale, draftEyeSeparation } from './draft-scale.js';
 
 const SCENE_VIEW_WIDTH = 320;
 const SCENE_VIEW_HEIGHT = 240;
@@ -32,6 +38,9 @@ function figure(canvas, caption) {
 }
 
 export function mountUi(root) {
+  // Заглушка из index.html больше не нужна: дальше разметку держит модуль.
+  root.textContent = '';
+
   const controls = createControls();
   const status = element('p');
   status.id = 'status';
@@ -56,6 +65,9 @@ export function mountUi(root) {
   renderer.setSize(SCENE_VIEW_WIDTH, SCENE_VIEW_HEIGHT, false);
 
   const { scene, camera, controls: orbit } = createScene(sceneCanvas);
+  // Вторая пара «рук» на самой стереограмме: так модель можно крутить, не
+  // отрывая глаз от картинки и не теряя сведение.
+  const stereogramOrbit = attachControls(camera, outputCanvas);
   camera.aspect = SCENE_VIEW_WIDTH / SCENE_VIEW_HEIGHT;
   camera.updateProjectionMatrix();
   showModel(scene, createDemoModel('sphere'));
@@ -126,16 +138,21 @@ export function mountUi(root) {
     const depthMap = buildDepthMap(values, width, height);
     drawDepthMap(depthCanvas, depthMap);
 
-    const { near, far, levels } = separationRange(
-      values.eyeSeparation,
-      values.depthStrength,
-    );
+    // Экранные числа (их видит пользователь) считаются по полному E, а
+    // генератору на черновике уходит уменьшенное: после растяжения
+    // сепарация возвращается к той же, и сведение глаз не сбивается.
+    const onScreen = separationRange(values.eyeSeparation, values.depthStrength);
+    const frameEyeSeparation =
+      mode === 'draft'
+        ? draftEyeSeparation(values.eyeSeparation, scale)
+        : values.eyeSeparation;
+    const frameSeparation = separationRange(frameEyeSeparation, values.depthStrength);
 
     const result = await pool.generate(depthMap, {
-      eyeSeparation: values.eyeSeparation,
+      eyeSeparation: frameEyeSeparation,
       depthStrength: values.depthStrength,
       crossEyed: values.crossEyed,
-      pattern: patternFor(values, far),
+      pattern: patternFor(values, frameSeparation.far),
     });
 
     drawStereogram(outputCanvas, result.image, display);
@@ -152,8 +169,9 @@ export function mountUi(root) {
         ? `Черновик ${width}×${height} (вращение), `
         : `${display.width}×${display.height}, `) +
       `${result.ms.toFixed(0)} мс в ${result.bands} потоках. ` +
-      `Ступеней рельефа: ${levels} (сепарация ${near}..${far} px, ` +
-      `повторов узора по ширине: ${(display.width / far).toFixed(1)}).` +
+      `Ступеней рельефа: ${frameSeparation.levels} ` +
+      `(сепарация на экране ${onScreen.near}..${onScreen.far} px, ` +
+      `повторов узора по ширине: ${(display.width / onScreen.far).toFixed(1)}).` +
       (values.model === 'hemisphere'
         ? ' Карта считается формулой, сцена не используется.'
         : '') +
@@ -231,8 +249,10 @@ export function mountUi(root) {
   // модель (`change`), считаются черновики — стереограмма живёт вместе с
   // вращением; по завершении жеста (`end`) идёт итоговый кадр в полном
   // разрешении. Без дебаунса: лишние запросы схлопывает requestFrame.
-  orbit.addEventListener('change', () => requestFrame('draft'));
-  orbit.addEventListener('end', () => requestFrame('final'));
+  for (const set of [orbit, stereogramOrbit]) {
+    set.addEventListener('change', () => requestFrame('draft'));
+    set.addEventListener('end', () => requestFrame('final'));
+  }
   // При изменении ширины окна стереограмму надо пересчитать, а не
   // растягивать готовую — растянутая не сводится.
   window.addEventListener('resize', scheduleRefresh);
