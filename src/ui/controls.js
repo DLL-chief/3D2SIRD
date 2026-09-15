@@ -23,6 +23,14 @@ const PATTERNS = [
   { value: 'image', label: 'Своя картинка' },
 ];
 
+// Как из картинки берётся полоса узора (docs/api_contracts.md, п.3).
+// Полоса всегда шириной в период узора, режим меняет только выборку.
+const PATTERN_MODES = [
+  { value: 'strip', label: 'Полоса от левого края' },
+  { value: 'drift', label: 'Полоса со сдвигом по строкам' },
+  { value: 'squeeze', label: 'Вся картинка, сжатая по ширине' },
+];
+
 const SLIDERS = [
   {
     name: 'eyeSeparation',
@@ -59,6 +67,17 @@ const SLIDERS = [
     step: 0.05,
     value: 0.35,
     format: (v) => v.toFixed(2),
+  },
+  // Стоит последним: к глубине отношения не имеет, работает только в
+  // режиме «полоса со сдвигом».
+  {
+    name: 'driftPerRow',
+    label: 'Сдвиг полосы на строку, px',
+    min: 0,
+    max: 3,
+    step: 0.1,
+    value: 0.7,
+    format: (v) => v.toFixed(1),
   },
 ];
 
@@ -106,6 +125,14 @@ export function createControls() {
   texture.type = 'file';
   texture.accept = 'image/*';
 
+  const patternMode = document.createElement('select');
+  for (const { value, label } of PATTERN_MODES) {
+    patternMode.add(new Option(label, value));
+  }
+
+  const mirror = document.createElement('input');
+  mirror.type = 'checkbox';
+
   const crossEyed = document.createElement('input');
   crossEyed.type = 'checkbox';
 
@@ -122,6 +149,8 @@ export function createControls() {
     labelled('Разрешение выхода', resolution),
     labelled('Узор', pattern),
     labelled('Картинка для узора', texture),
+    labelled('Как ложится картинка', patternMode),
+    labelled('Отражать полосу (без шва)', mirror),
   );
 
   for (const slider of SLIDERS) {
@@ -143,11 +172,35 @@ export function createControls() {
 
   root.append(labelled('Перекрёстный взгляд', crossEyed), exportButton);
 
+  // Ручки узора-картинки не имеют смысла при шуме, а сдвиг — вне режима
+  // 'drift'. Заблокированный контрол честнее спрятанного: панель не
+  // перестраивается на каждый выбор, и видно, что ручка вообще есть.
+  function syncAvailability() {
+    const image = pattern.value === 'image';
+    const enabled = new Map([
+      [texture, image],
+      [patternMode, image],
+      [mirror, image],
+      [sliders.get('driftPerRow'), image && patternMode.value === 'drift'],
+    ]);
+    for (const [control, on] of enabled) {
+      control.disabled = !on;
+      control.closest('label').classList.toggle('off', !on);
+    }
+  }
+
+  for (const control of [pattern, patternMode]) {
+    control.addEventListener('input', syncAvailability);
+  }
+  syncAvailability();
+
   function read() {
     const values = {
       model: model.value,
       resolution: resolution.value,
       pattern: pattern.value,
+      patternMode: patternMode.value,
+      mirror: mirror.checked,
       crossEyed: crossEyed.checked,
     };
     for (const [name, input] of sliders) {
@@ -186,9 +239,11 @@ export function createControls() {
     },
     setPattern(value) {
       pattern.value = value;
+      syncAvailability();
     },
     onInput(handler) {
-      for (const input of [...sliders.values(), resolution, pattern, crossEyed]) {
+      const extra = [resolution, pattern, patternMode, mirror, crossEyed];
+      for (const input of [...sliders.values(), ...extra]) {
         input.addEventListener('input', handler);
       }
     },

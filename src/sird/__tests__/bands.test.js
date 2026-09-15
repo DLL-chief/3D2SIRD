@@ -10,16 +10,16 @@ const PARAMS = {
   pattern: { type: 'noise', color: false, seed: 42 },
 };
 
-function fullFrame(depthMap) {
+function fullFrame(depthMap, params = PARAMS) {
   return generate(
     { ...depthMap, data: Float32Array.from(depthMap.data) },
-    PARAMS,
+    params,
   ).data;
 }
 
 // То, что делает пул воркеров: кадр режется на полосы, каждая считается
 // со своим смещением строк, результаты склеиваются.
-function byBands(depthMap, bandCount) {
+function byBands(depthMap, bandCount, params = PARAMS) {
   const { width, height, data } = depthMap;
   const rowsPerBand = Math.ceil(height / bandCount);
   const out = new Uint8ClampedArray(width * height * 4);
@@ -33,7 +33,7 @@ function byBands(depthMap, bandCount) {
         height: rowCount,
         data: data.slice(rowStart * width, (rowStart + rowCount) * width),
       },
-      PARAMS,
+      params,
       rowStart,
     );
     out.set(band.data, rowStart * width * 4);
@@ -50,6 +50,30 @@ describe('расчёт кадра полосами', () => {
     const whole = Buffer.from(fullFrame(depthMap).buffer);
     for (const bandCount of [2, 3, 4, 8, 16]) {
       expect(Buffer.from(byBands(depthMap, bandCount).buffer)).toEqual(whole);
+    }
+  });
+
+  it('узор-картинка со сдвигом по строкам тоже делится полосами', () => {
+    // В режиме 'drift' полоса текстуры зависит от номера строки, поэтому
+    // именно здесь ошибка в rowOffset была бы видна как разрыв на границе
+    // полос. Текстура узкая и «номерная»: любой сдвиг заметен.
+    const texture = { width: 37, height: 11, data: new Uint8ClampedArray(37 * 11 * 4) };
+    for (let y = 0; y < texture.height; y++) {
+      for (let x = 0; x < texture.width; x++) {
+        const i = (y * texture.width + x) * 4;
+        texture.data[i] = x * 7;
+        texture.data[i + 1] = y * 23;
+        texture.data[i + 2] = 64;
+        texture.data[i + 3] = 255;
+      }
+    }
+    const params = {
+      ...PARAMS,
+      pattern: { type: 'image', data: texture, mode: 'drift', driftPerRow: 1 },
+    };
+    const whole = Buffer.from(fullFrame(depthMap, params).buffer);
+    for (const bandCount of [2, 3, 5, 8]) {
+      expect(Buffer.from(byBands(depthMap, bandCount, params).buffer)).toEqual(whole);
     }
   });
 
