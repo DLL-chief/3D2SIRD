@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { nextDraftScale, DRAFT_SCALE_LIMITS } from '../draft-scale.js';
+import { nextDraftScale, draftEyeSeparation, DRAFT_SCALE_LIMITS } from '../draft-scale.js';
+import { separation } from '../../sird/separation.js';
 
 describe('nextDraftScale', () => {
   it('на медленном кадре уменьшает масштаб', () => {
@@ -25,6 +26,20 @@ describe('nextDraftScale', () => {
     let scale = 0.8;
     for (let i = 0; i < 20; i++) scale = nextDraftScale(scale, 5);
     expect(scale).toBe(DRAFT_SCALE_LIMITS.max);
+  });
+
+  it('экранный период черновика совпадает с итоговым', () => {
+    // Главное свойство: черновик растягивается на полотно, поэтому его
+    // сепарация после растяжения обязана совпасть с сепарацией итогового
+    // кадра — иначе при вращении глаза теряют сведение.
+    const mu = 0.45;
+    for (const eyeSeparation of [120, 180, 240, 300]) {
+      const onScreen = separation(0, eyeSeparation, mu);
+      for (const scale of [0.35, 0.5, 0.6, 0.8, 1]) {
+        const draft = separation(0, draftEyeSeparation(eyeSeparation, scale), mu);
+        expect(Math.abs(draft / scale - onScreen)).toBeLessThanOrEqual(2);
+      }
+    }
   });
 
   it('сходится к рабочему диапазону, а не колеблется', () => {

@@ -26,6 +26,12 @@ export function createScene(domElement) {
   const camera = new THREE.PerspectiveCamera(FIELD_OF_VIEW, 1, 0.1, 100);
   camera.position.set(0, 0, CAMERA_DISTANCE);
 
+  return { scene, camera, controls: attachControls(camera, domElement) };
+}
+
+// Управление вешается на несколько элементов сразу (предпросмотр сцены и
+// сама стереограмма): все наборы контролов вращают одну камеру.
+export function attachControls(camera, domElement) {
   const controls = new OrbitControls(camera, domElement);
   // Затухание выключено намеренно: с ним камера продолжает ехать по
   // инерции ещё секунды после отпускания кнопки, а карта глубины и
@@ -33,10 +39,12 @@ export function createScene(domElement) {
   // тем, что видно в предпросмотре. Заодно событие `change` при затухании
   // сыпется каждый кадр, и любой дебаунс на нём не срабатывает вообще.
   controls.enableDamping = false;
+  // Панорама выключена: цель у каждого набора контролов своя, и сдвиг
+  // одной развёл бы наборы между собой — камера-то одна.
+  controls.enablePan = false;
   controls.target.set(0, 0, 0);
   controls.update();
-
-  return { scene, camera, controls };
+  return controls;
 }
 
 // Материалы модели заменяются на простой: этот модуль отвечает только за
