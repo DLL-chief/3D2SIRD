@@ -69,12 +69,15 @@ npm run dev
 │   └── adr/
 │       ├── 001-gitlab-single-source-of-truth.md
 │       ├── 002-no-framework-vanilla-vite.md
-│       └── 003-sird-cpu-worker-first.md
+│       ├── 003-sird-cpu-worker-first.md
+│       ├── 004-realtime-via-worker-pool.md
+│       └── 005-photo-as-overlay.md
 └── src/
     ├── README.md        — конвенция модульных README
     ├── scene/           — Three.js: загрузка модели, камера, управление
     ├── depth/           — рендер карты глубины из сцены
     ├── sird/            — генератор стереограммы (чистый JS, не знает про Three.js)
+    ├── mix/             — фотография подложкой поверх готового кадра (ADR-005)
     └── ui/              — контролы, превью, экспорт
 ```
 

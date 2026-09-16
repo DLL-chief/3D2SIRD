@@ -17,11 +17,20 @@ import { createGeneratorPool } from '../sird/pool.js';
 import { createControls } from './controls.js';
 import { drawDepthMap, drawStereogram, outputSize } from './render.js';
 import { downloadCanvasPng, pngFilename } from './export.js';
-import { decodeImageFile, textureToImageData } from './texture.js';
+import { decodeImageFile, textureToImageData, photoToImageData } from './texture.js';
+import { blurRgba, modulate } from '../mix/index.js';
 import { nextDraftScale, draftEyeSeparation } from './draft-scale.js';
 
 const SCENE_VIEW_WIDTH = 320;
 const SCENE_VIEW_HEIGHT = 240;
+
+// Предел сведения: параллельным взглядом период узора сводится, пока он не
+// больше расстояния между зрачками — около 63 мм, то есть 238 px при
+// 96 dpi. Точный DPI экрана браузер не сообщает, поэтому число служит
+// предупреждением, а не запретом.
+const EYE_DISTANCE_PX = 238;
+
+const millimetres = (px) => ((px * 25.4) / 96).toFixed(0);
 
 function element(tag, className) {
   const node = document.createElement(tag);
@@ -120,6 +129,34 @@ export function mountUi(root) {
     return textureSlice.data;
   }
 
+  // Подложка считается на размер кадра и размывается один раз: при
+  // вращении ни размер, ни радиус не меняются, а размытие 968×678 — это
+  // десятки миллисекунд, их незачем платить на каждый кадр.
+  let overlaySlice = null;
+
+  function overlayData(frame, radius) {
+    const key = `${frame.width}×${frame.height}@${radius}`;
+    if (overlaySlice?.bitmap !== texture || overlaySlice.key !== key) {
+      const photo = photoToImageData(texture, frame);
+      overlaySlice = { bitmap: texture, key, data: blurRgba(photo, radius) };
+    }
+    return overlaySlice.data;
+  }
+
+  // Фотография ложится поверх готового кадра, а не в узор: в узоре видно
+  // ровно период round(E/2) столбцов, подложкой — вся картинка целиком
+  // (docs/adr/005). Стерео при этом держится на точках.
+  function applyOverlay(values, image) {
+    if (values.pattern !== 'overlay' || !texture) return image;
+    const frame = { width: image.width, height: image.height };
+    const photo = overlayData(frame, values.overlayBlur);
+    return new ImageData(
+      modulate(image, photo, values.overlayAmount),
+      frame.width,
+      frame.height,
+    );
+  }
+
   function patternFor(values, period, frameHeight) {
     if (values.pattern === 'image' && texture) {
       // Период узора — сепарация фона round(E/2), а не E: именно с таким
@@ -179,7 +216,7 @@ export function mountUi(root) {
       pattern: patternFor(values, frameSeparation.far, height),
     });
 
-    drawStereogram(outputCanvas, result.image, display);
+    drawStereogram(outputCanvas, applyOverlay(values, result.image), display);
 
     // Масштаб черновика меряется по всей цепочке, а не по одному
     // генератору: карта глубины считается в том же кадре.
@@ -194,13 +231,22 @@ export function mountUi(root) {
         : `${display.width}×${display.height}, `) +
       `${result.ms.toFixed(0)} мс в ${result.bands} потоках. ` +
       `Ступеней рельефа: ${frameSeparation.levels} ` +
-      `(сепарация на экране ${onScreen.near}..${onScreen.far} px, ` +
+      `(сепарация на экране ${onScreen.near}..${onScreen.far} px ` +
+      `≈ ${millimetres(onScreen.far)} мм при 96 dpi, ` +
       `повторов узора по ширине: ${(display.width / onScreen.far).toFixed(1)}).` +
+      (onScreen.far > EYE_DISTANCE_PX
+        ? ' Период узора больше расстояния между зрачками — параллельным' +
+          ' взглядом такой кадр не сводится, уменьшите E.'
+        : '') +
       (values.model === 'hemisphere'
         ? ' Карта считается формулой, сцена не используется.'
         : '') +
-      (values.pattern === 'image' && !texture
-        ? ' Картинка для узора не выбрана — рисую случайными точками.'
+      (!texture && (values.pattern === 'image' || values.pattern === 'overlay')
+        ? ' Картинка не выбрана — рисую случайными точками.'
+        : '') +
+      (values.pattern === 'overlay' && texture
+        ? ` Фото подложкой (сила ${values.overlayAmount.toFixed(2)}):` +
+          ' стерео держится на точках, фотография видна целиком.'
         : '') +
       (scaled
         ? ' Картинка шире страницы: в PNG она годится, а на экране сводится' +

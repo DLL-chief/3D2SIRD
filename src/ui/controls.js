@@ -20,7 +20,11 @@ const RESOLUTIONS = [
 const PATTERNS = [
   { value: 'noise-bw', label: 'Случайные точки, ч/б' },
   { value: 'noise-color', label: 'Случайные точки, цветные' },
-  { value: 'image', label: 'Своя картинка' },
+  { value: 'image', label: 'Своя картинка узором' },
+  // Стерео на точках, фотография — подложкой поверх готового кадра
+  // (docs/adr/005): узором фотография видна только полосой шириной в
+  // период, подложкой — целиком.
+  { value: 'overlay', label: 'Фото подложкой + точки' },
 ];
 
 // Как из картинки берётся полоса узора (docs/api_contracts.md, п.3).
@@ -36,7 +40,12 @@ const SLIDERS = [
     name: 'eyeSeparation',
     label: 'E — межзрачковое расстояние, px',
     min: 60,
-    max: 300,
+    // Период узора на фоне — round(E/2). Свести параллельным взглядом
+    // можно, пока период не больше расстояния между зрачками (~63 мм,
+    // это ~238 px при 96 dpi), то есть примерно до E=476. Ползунок
+    // остановлен на 400 (период ~53 мм): дальше сводить уже мучительно,
+    // а в строке статуса период показан в миллиметрах.
+    max: 400,
     step: 10,
     value: 180,
     format: (v) => String(v),
@@ -68,8 +77,7 @@ const SLIDERS = [
     value: 0.35,
     format: (v) => v.toFixed(2),
   },
-  // Стоит последним: к глубине отношения не имеет, работает только в
-  // режиме «полоса со сдвигом».
+  // Ручки узора стоят последними: к глубине отношения не имеют.
   {
     name: 'driftPerRow',
     label: 'Сдвиг полосы на строку, px',
@@ -78,6 +86,27 @@ const SLIDERS = [
     step: 0.1,
     value: 0.7,
     format: (v) => v.toFixed(1),
+  },
+  {
+    name: 'overlayAmount',
+    label: 'Сила фото-подложки',
+    min: 0,
+    max: 1,
+    step: 0.05,
+    value: 0.6,
+    format: (v) => v.toFixed(2),
+  },
+  {
+    name: 'overlayBlur',
+    label: 'Размытие подложки, px',
+    min: 0,
+    max: 48,
+    step: 4,
+    // Замер показал, что машинному сопоставлению радиус безразличен
+    // (docs/adr/005): он торгует детали фотографии против собственного
+    // шума точек, а это дело глаза. 8 px — осторожная середина.
+    value: 8,
+    format: (v) => String(v),
   },
 ];
 
@@ -177,11 +206,15 @@ export function createControls() {
   // перестраивается на каждый выбор, и видно, что ручка вообще есть.
   function syncAvailability() {
     const image = pattern.value === 'image';
+    const overlay = pattern.value === 'overlay';
     const enabled = new Map([
-      [texture, image],
+      // Картинка нужна и узором, и подложкой.
+      [texture, image || overlay],
       [patternMode, image],
       [mirror, image],
       [sliders.get('driftPerRow'), image && patternMode.value === 'drift'],
+      [sliders.get('overlayAmount'), overlay],
+      [sliders.get('overlayBlur'), overlay],
     ]);
     for (const [control, on] of enabled) {
       control.disabled = !on;
@@ -238,7 +271,9 @@ export function createControls() {
       });
     },
     setPattern(value) {
-      pattern.value = value;
+      // Пользователь уже выбрал, как использовать картинку — не
+      // перебивать его выбор при загрузке файла.
+      if (pattern.value !== 'overlay') pattern.value = value;
       syncAvailability();
     },
     onInput(handler) {

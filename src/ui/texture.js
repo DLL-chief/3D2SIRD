@@ -52,3 +52,28 @@ export function textureToImageData(bitmap, options) {
   context.drawImage(bitmap, -offsetX, 0, drawWidth, height);
   return context.getImageData(0, 0, width, height);
 }
+
+// Фотография-подложка (`src/mix/`) кладётся на весь кадр, поэтому
+// масштабируется «по большей стороне»: пропорции сохраняются, лишнее
+// обрезается. Растягивать нельзя — лица и горизонты поедут.
+export function coverGeometry({ width: sourceWidth, height: sourceHeight }, frame) {
+  const scale = Math.max(frame.width / sourceWidth, frame.height / sourceHeight);
+  const drawWidth = Math.max(1, Math.round(sourceWidth * scale));
+  const drawHeight = Math.max(1, Math.round(sourceHeight * scale));
+  return {
+    drawWidth,
+    drawHeight,
+    offsetX: Math.round((frame.width - drawWidth) / 2),
+    offsetY: Math.round((frame.height - drawHeight) / 2),
+  };
+}
+
+export function photoToImageData(bitmap, frame) {
+  const { drawWidth, drawHeight, offsetX, offsetY } = coverGeometry(bitmap, frame);
+  const canvas = document.createElement('canvas');
+  canvas.width = frame.width;
+  canvas.height = frame.height;
+  const context = canvas.getContext('2d');
+  context.drawImage(bitmap, offsetX, offsetY, drawWidth, drawHeight);
+  return context.getImageData(0, 0, frame.width, frame.height);
+}
