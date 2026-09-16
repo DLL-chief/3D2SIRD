@@ -105,42 +105,36 @@ export function mountUi(root) {
     return renderDepth(renderer, scene, camera, { width, height, blur, floor });
   }
 
-  // Картинка для узора хранится как ImageBitmap: масштаб зависит от E и от
-  // режима, поэтому под каждый пересчёт она уменьшается заново. Результат
-  // кэшируется — при вращении E и режим не меняются, а getImageData на
-  // каждый кадр стоит миллисекунды.
+  // Картинка для узора хранится как ImageBitmap: срез зависит от E, от
+  // высоты кадра и от режима, поэтому готовится заново под каждый
+  // пересчёт. Результат кэшируется — при вращении ничего из этого не
+  // меняется, а getImageData на каждый кадр стоит миллисекунды.
   let texture = null;
-  let scaledTexture = null;
+  let textureSlice = null;
 
-  // Во сколько периодов шириной уменьшается картинка для режимов, которые
-  // берут из неё полосу. Ровно в период уменьшать нельзя: полоса тогда и
-  // есть вся картинка, и «сдвиг по строкам» ничего не открывает; сильно
-  // шире — полоса становится случайным вертикальным срезом без узнаваемого
-  // содержимого, да и копий ImageData в воркеры уходит больше.
-  const STRIP_TEXTURE_PERIODS = 4;
-
-  function textureWidthFor(mode, period) {
-    // 'squeeze' сжимает картинку сам, выборкой ближайшего соседа. Чтобы
-    // она не рассыпалась в алиасинг, уменьшение до ширины полосы делает
-    // canvas (он усредняет пиксели), а генератор потом берёт столбцы
-    // один к одному.
-    return mode === 'squeeze' ? period : period * STRIP_TEXTURE_PERIODS;
-  }
-
-  function textureData(width) {
-    if (scaledTexture?.bitmap !== texture || scaledTexture.width !== width) {
-      scaledTexture = { bitmap: texture, width, data: textureToImageData(texture, width) };
+  function textureData(options) {
+    const key = JSON.stringify(options);
+    if (textureSlice?.bitmap !== texture || textureSlice.key !== key) {
+      textureSlice = { bitmap: texture, key, data: textureToImageData(texture, options) };
     }
-    return scaledTexture.data;
+    return textureSlice.data;
   }
 
-  function patternFor(values, backgroundSeparation) {
+  function patternFor(values, period, frameHeight) {
     if (values.pattern === 'image' && texture) {
       // Период узора — сепарация фона round(E/2), а не E: именно с таким
-      // шагом повторяется полоса (docs/api_contracts.md, п.3).
+      // шагом повторяется полоса (docs/api_contracts.md, п.3). При mirror
+      // исходных столбцов нужно вдвое меньше — вторую половину полосы
+      // генератор получает отражением.
+      const sampleWidth = values.mirror ? Math.ceil(period / 2) : period;
       return {
         type: 'image',
-        data: textureData(textureWidthFor(values.patternMode, backgroundSeparation)),
+        data: textureData({
+          frameHeight,
+          sampleWidth,
+          mode: values.patternMode,
+          driftPerRow: values.driftPerRow,
+        }),
         mode: values.patternMode,
         mirror: values.mirror,
         driftPerRow: values.driftPerRow,
@@ -182,7 +176,7 @@ export function mountUi(root) {
       eyeSeparation: frameEyeSeparation,
       depthStrength: values.depthStrength,
       crossEyed: values.crossEyed,
-      pattern: patternFor(values, frameSeparation.far),
+      pattern: patternFor(values, frameSeparation.far, height),
     });
 
     drawStereogram(outputCanvas, result.image, display);
